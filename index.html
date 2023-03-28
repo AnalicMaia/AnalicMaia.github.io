@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chatbot com OpenAI daVinci</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.12.313/pdf.min.js"></script>
+  <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .chat-container {
+      width: 80%;
+      height: 80%;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-messages {
+      flex: 1;
+      padding: 8px;
+      overflow-y: auto;
+    }
+    .chat-input {
+      display: flex;
+      padding: 8px;
+    }
+    .chat-input input[type="text"] {
+      flex: 1;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 8px;
+    }
+    .chat-input input[type="file"] {
+      margin-left: 8px;
+    }
+    .chat-input button {
+      margin-left: 8px;
+      border: none;
+      padding: 8px 16px;
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+    
+  <div class="chat-container">
+    <div class="chat-messages" id="chatMessages"></div>
+    <div class="chat-input">
+      <input type="text" id="userMessage" placeholder="Digite sua mensagem...">
+      <input type="file" id="attachment" accept=".pdf,.xls,.xlsx" onchange="handleFileUpload()">
+      <button onclick="sendMessage()">Enviar</button>
+    </div>
+  </div>
+  <script>
+    
+    const chatMessages = document.getElementById('chatMessages');
+    const userMessage = document.getElementById('userMessage');
+    const attachment = document.getElementById('attachment');
+    function sendMessage() {
+      const messageText = userMessage.value.trim();
+      if (!messageText) return;
+      chatMessages.innerHTML += `<div><b>Você:</b> ${messageText}</div>`;
+      userMessage.value = '';
+      fetchDaVinciResponse(messageText).then(response => {
+        chatMessages.innerHTML += `<div><b>Chatbot:</b> ${response}</div>`;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      });
+    }
+    function handleFileUpload() {
+      if (!attachment.files || !attachment.files[0]) return;
+      const file = attachment.files[0];
+      const fileType = file.type;
+      const fileSize = file.size;
+      const fileName = file.name;
+      if (fileSize > 10 * 1024 * 1024) {
+        alert('O arquivo é muito grande. Por favor, selecione um arquivo menor que 10 MB.');
+        return;
+      }
+      if (fileType === 'application/pdf') {
+        readPDF(file);
+      } else if (fileType === 'application/vnd.ms-excel' || fileType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+        readExcel(file);
+      }
+      attachment.value = '';
+    }
+    async function readPDF(file) {
+      const reader = new FileReader();
+      reader.onload = async function(e) {
+        const typedArray = new Uint8Array(e.target.result);
+        const pdf = await pdfjsLib.getDocument({data: typedArray}).promise;
+        const numPages = pdf.numPages;
+        let pdfText = '';
+        for (let i = 1; i <= numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map(item => item.str).join(' ');
+          pdfText += text + '\n';
+        }
+        chatMessages.innerHTML += `<div><b>Conteúdo do arquivo PDF:</b><pre>${pdfText}</pre></div>`;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        const messageText = `Por favor, me explique os insights interessantes do arquivo PDF "${file.name}" que talvez ninguém tenha notado.`;
+        fetchDaVinciResponse(messageText).then(response => {
+          chatMessages.innerHTML += `<div><b>Chatbot:</b> ${response}</div>`;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+    function readExcel(file) {
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, {type: 'array'});
+        const firstSheetName = workbook.SheetNames[0];
+        const firstSheet = workbook.Sheets[firstSheetName];
+        const sheetData = XLSX.utils.sheet_to_json(firstSheet, {header: 1});
+        chatMessages.innerHTML += `<div><b>Conteúdo da primeira planilha do arquivo Excel:</b><pre>${JSON.stringify(sheetData, null, 2)}</pre></div>`;
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        const messageText = `Por favor, me explique os insights interessantes do arquivo Excel "${file.name}" que talvez ninguém tenha notado.`;
+        fetchDaVinciResponse(messageText).then(response => {
+          chatMessages.innerHTML += `<div><b>Chatbot:</b> ${response}</div>`;
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    }
+    async function fetchDaVinciResponse(messageText) {
+      const apiKey = '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';
+      const prompt = `Usuário: ${messageText}\nChatbot:`;
+      const response = await fetch('https://api.openai.com/v1/engines/text-davinci-003/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          temperature: 0.7,
+          max_tokens: 100,
+          top_p: 1,
+          frequency_penalty: 0,
+          presence_penalty: 0
+        })
+      });
+      const data = await response.json();
+      const chatbotResponse = data.choices && data.choices[0] && data.choices[0].text.trim() || 'Desculpe, não entendi sua mensagem.';
+      readAloud(chatbotResponse);
+      return chatbotResponse;
+    }
+    function readAloud(text) {
+      const speech = new SpeechSynthesisUtterance();
+      speech.text = text;
+      speech.lang = 'pt-BR'; // Defina o idioma apropriado aqui, se necessário
+      window.speechSynthesis.speak(speech);
+    }
+  </script>
+</body>
+</html>
